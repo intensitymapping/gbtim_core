@@ -1,0 +1,17 @@
+language: python
+os: linux
+python:
+    - 2.7
+addons:
+    apt:
+        packages:
+            - libhdf5-serial-dev
+            - libopenmpi-dev
+            - openmpi-bin
+install:
+    - "pip install -r requirements.txt"
+    - "pip install -r doc/requirements.txt"
+script:
+    - "sphinx-build -b html doc/ doc/_build/html"
+    - "cd ~; nosetests caput"
+

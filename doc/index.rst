@@ -2,7 +2,7 @@
 caput Documentation
 ===================
 
-.. currentmodule:: caput
+.. currentmodule:: gbtim_core
 
 
 Packages

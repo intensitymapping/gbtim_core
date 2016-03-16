@@ -1,2 +1,2 @@
--e git+https://github.com/radiocosmology/caput#egg=caput
+git+https://github.com/radiocosmology/caput#egg=caput>=0.2
 

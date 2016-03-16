@@ -1,6 +1,6 @@
-===================
-caput Documentation
-===================
+========================
+GBTIM_core Documentation
+========================
 
 .. currentmodule:: gbtim_core
 

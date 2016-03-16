@@ -10,8 +10,9 @@ addons:
             - openmpi-bin
 install:
     - "pip install -r requirements.txt"
+    - "python setup.py develop"
     - "pip install -r doc/requirements.txt"
 script:
     - "sphinx-build -b html doc/ doc/_build/html"
-    - "cd ~; nosetests caput"
+    - "cd ~; nosetests gbtim_core"
 

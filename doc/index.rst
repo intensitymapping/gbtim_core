@@ -1,8 +1,8 @@
-===================
-caput Documentation
-===================
+========================
+GBTIM_core Documentation
+========================
 
-.. currentmodule:: caput
+.. currentmodule:: gbtim_core
 
 
 Packages

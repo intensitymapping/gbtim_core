@@ -47,11 +47,17 @@ if on_rtd:
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 # 'numpydoc' does not ship with sphinx. To get it use `pip install numpydoc`.
 extensions = ['sphinx.ext.autodoc', 'sphinx.ext.pngmath', 'sphinx.ext.mathjax',
-              'numpydoc', 'sphinx.ext.autosummary', 'sphinx.ext.viewcode']
+              'numpydoc', 'sphinx.ext.autosummary', 'sphinx.ext.viewcode',
+              'sphinx.ext.intersphinx']
+
 
 numpydoc_show_class_members = False
 import glob
 autosummary_generate = glob.glob("*.rst")
+
+
+intersphinx_mapping = {'caput': ('http://caput.readthedocs.org/en/latest/', None)}
+intersphinx_cache_limit = 1
 
 
 # Add any paths that contain templates here, relative to this directory.

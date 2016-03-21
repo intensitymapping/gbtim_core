@@ -7,3 +7,5 @@ funcsigs
 mock
 PyYAML
 numpy
+git+https://github.com/radiocosmology/caput#egg=caput
+

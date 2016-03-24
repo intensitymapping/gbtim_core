@@ -8,8 +8,9 @@ addons:
             - libhdf5-serial-dev
             - libopenmpi-dev
             - openmpi-bin
-            - python-h5py
-            - cython
+            # These don't help speed up build due to virtual-env
+            #- python-h5py
+            #- cython
 install:
     - "pip install -r requirements.txt"
     - "python setup.py develop"

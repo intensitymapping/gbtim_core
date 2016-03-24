@@ -17,7 +17,7 @@ setup(
     name = 'gbtim_core',
     version = __version__,
     packages = ['gbtim_core', 'gbtim_core.tests'],
-    scripts=[],
+    scripts=['bin/populate_metadb'],
     install_requires=requires,
     extras_require = {
         },

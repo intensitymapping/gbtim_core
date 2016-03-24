@@ -14,11 +14,30 @@ Classes
 .. autosummary::
    :toctree: generated/
 
+    Target
     Allocation
     Session
     ScanSet
     Scan
     GuppiFile
+
+
+Functions
+=========
+
+.. autosummary::
+   :toctree: generated/
+
+    connect_db
+    read_guppi_header_info
+    read_guppi_data_info
+
+
+Constants
+=========
+
+DATAFILE_PATTERN : string
+    Regular expression that matches data GUPPI psrfits file names.
 
 """
 
@@ -26,8 +45,10 @@ Classes
 import datetime
 import sqlite3
 import logging
+import re
 
 import peewee as pw
+from astropy.io import fits
 
 
 # Global Variables and Constants
@@ -36,6 +57,9 @@ import peewee as pw
 logger = logging.getLogger(__name__)
 
 database_proxy = pw.Proxy()
+
+# Regex for filenames that match our data files.
+DATAFILE_PATTERN = "guppi_[0-9]{5}_.*_[0-9]{4}_[0-9]{4}.fits"
 
 
 # Peewee setup
@@ -47,6 +71,12 @@ class base_model(pw.Model):
     class Meta:
         database = database_proxy
 
+
+def connect_db(filename):
+    """Connect to an SQLite database given by its filename."""
+
+    logger.info("Connecting to database %s" % filename)
+    database_proxy.initialize(pw.SqliteDatabase(filename))
 
 
 # Tables pertaining to the raw data
@@ -60,6 +90,7 @@ class Target(base_model):
     name
     ra
     dec
+    scans
 
     """
 
@@ -99,6 +130,7 @@ class Session(base_model):
     ----------
     allocation
     number
+    scans
 
     """
 
@@ -114,16 +146,16 @@ class ScanSet(base_model):
     same elevation angle. For calibration scans these can be on-source and
     off-source scans, or the legs of a spider scan.
 
+    This is the only field that cannot be filled from the raw GUPPI data files,
+    and requires inspecting the GBT GO fits files.
+
     Attributes
     ----------
-    session
-    target
     kind
+    scans
 
     """
 
-    session = pw.ForeignKeyField(Session, related_name='scansets')
-    target = pw.ForeignKeyField(Target, related_name='scansets')
     kind = pw.CharField(max_length=128)
 
 
@@ -132,7 +164,11 @@ class Scan(base_model):
 
     Attributes
     ----------
+    session
+    target
     scanset
+    mode
+    cadence
     ra_min
     ra_max
     dec_min
@@ -146,7 +182,11 @@ class Scan(base_model):
 
     """
 
-    scanset = pw.ForeignKeyField(ScanSet, related_name='scans')
+    session = pw.ForeignKeyField(Session, related_name='scans')
+    target = pw.ForeignKeyField(Target, related_name='scans')
+    scanset = pw.ForeignKeyField(ScanSet, related_name='scans', null=True)
+    mode = pw.CharField(max_length=16, null=True)
+    cadence = pw.DoubleField(null=True)
     ra_min = pw.DoubleField(null=True)
     ra_max = pw.DoubleField(null=True)
     dec_min = pw.DoubleField(null=True)
@@ -176,5 +216,62 @@ class GuppiFile(base_model):
 
 
 
+# Meta data retrieval functions
+# =============================
 
+def get_guppi_header_info(filename):
+    """Read header of GUPPI data to retrieve meta data.
+
+    Given a GUPPI file name, this function retrieves the *allocation.term*,
+    *allocation.number*, *session*, *target*, *mode*, *cadence*, *start_time*,
+    and *end_time* of the data. These parameters are stored in the header and
+    do not require reading a significant portion of the file.
+
+    Returns
+    -------
+    info : dict
+        Metadata for the file. Keys are listed above.
+
+    """
+
+    info = {}
+
+    hdulist = fits.open(filename, 'readonly')
+    header0 = hdulist[0].header
+    header1 = hdulist[1].header
+    data_len = len(hdulist[1].data)
+
+    info['mode'] = header0['OBS_MODE'].strip()
+
+    session_id = header0['PROJID'].strip()
+    session_id_re = "AGBT([0-9]{2}[ABC])_([0-9]*)_([0-9]*)"
+    match = re.match(session_id_re, session_id)
+    info['allocation.term'] = match.group(1)
+    info['allocation.number'] = int(match.group(2))
+    info['session'] = int(match.group(3))
+
+    hdulist.close()
+    return info
+
+def get_guppi_data_info(filename, md5=False):
+    """Read GUPPI data to retrieve meta data.
+
+    Like :func:`get_guppi_header_info` but also reads the pointing information
+    to retrieve *ra_min*, *ra_max*, *dec_min*, *dec_max, *az_min*, *az_max*,
+    *el_min*, and *el_max*. Optionally perform an md5sum on the file (*md5*).
+
+    Returns
+    -------
+    info : dict
+        Metadata for the file. Keys listed above, plus those for
+        :func:`get_guppi_header_info`.
+
+    """
+
+    info = get_guppi_header_info(filename)
+
+    hdulist = fits.open(filename, 'readonly')
+
+    hdulist.close()
+    return info
 

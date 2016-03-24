@@ -1,0 +1,62 @@
+#! /usr/bin/python
+
+
+import argparse
+import logging
+import os
+from os import path
+import sys
+import re
+
+from gbtim_core import metadb
+
+logger = logging.getLogger(__name__)
+
+# Display logging from all modules.
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+#logger.setLevel(logging.INFO)
+#logger.addHandler(logging.StreamHandler())
+
+
+parser = argparse.ArgumentParser(
+        description='Crawl directory tree and populate index of GBTIM data',
+        )
+parser.add_argument(
+        "database",
+        type=str,
+        help="SQLite database file.",
+        )
+parser.add_argument(
+        "directory",
+        nargs='*',
+        type=str,
+        help="What directories to crawl when searching files.",
+        )
+
+
+filename_re = re.compile(metadb.DATAFILE_PATTERN)
+
+
+def process_file(filepath):
+    print metadb.get_guppi_header_info(filepath)
+
+
+def main():
+    args = parser.parse_args()
+    metadb.connect_db(args.database)
+
+    for directory in args.directory:
+        for dirpath, subdirs, filenames in os.walk(directory):
+            for filename in filenames:
+                if filename_re.match(filename):
+                    filepath = path.join(dirpath, filename)
+                    logger.debug("Matching file found: %s" % filepath)
+                    process_file(filepath)
+
+
+
+
+
+
+if __name__ == "__main__":
+    main()

@@ -6,7 +6,8 @@ from gbtim_core import __version__
 
 REQUIRES = ['caput']
 
-# Don't install requirements if on ReadTheDocs build system.
+# Don't install requirements if on ReadTheDocs build system (there is a
+# separate requirements.txt).
 on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
 if on_rtd:
     requires = []
@@ -17,13 +18,13 @@ setup(
     name = 'gbtim_core',
     version = __version__,
     packages = ['gbtim_core', 'gbtim_core.tests'],
-    scripts=['bin/populate_metadb'],
+    scripts=['bin/gbtim_populate_metadb'],
     install_requires=requires,
     extras_require = {
         },
 
     # metadata for upload to PyPI
-    author = "Kiyo Masui",
+    author = "Kiyoshi Masui",
     author_email = "kiyo@physics.ubc.ca",
     description = "GBTIM analysis software core",
     license = "GPL v3.0",

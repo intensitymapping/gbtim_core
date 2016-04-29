@@ -13,7 +13,7 @@ from gbtim_core import metadb
 logger = logging.getLogger(__name__)
 
 # Display logging from all modules.
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 #logger.setLevel(logging.INFO)
 #logger.addHandler(logging.StreamHandler())
 
@@ -38,7 +38,67 @@ filename_re = re.compile(metadb.DATAFILE_PATTERN)
 
 
 def process_file(filepath):
-    print metadb.get_guppi_header_info(filepath)
+    info = metadb.get_guppi_filename_info(filepath)
+    info.update(metadb.get_guppi_header_info(filepath))
+    #info.update(metadb.get_guppi_data_info(filepath))
+
+    print info
+    # Work down the hierachy.
+    allocation, created = metadb.Allocation.get_or_create(
+            term=info.pop('allocation.term'),
+            number=info.pop('allocation.number'),
+            )
+    if created:
+        msg = "Entered allocation %s"
+        logger.info(msg % allocation.name)
+    session, created = metadb.Session.get_or_create(
+            allocation=allocation,
+            number=info.pop('session.number'),
+            )
+    if created:
+        msg = "Entered session %s"
+        logger.info(msg % session.identity)
+    scan, created = metadb.Scan.get_or_create(
+            session=session,
+            number=info.pop('scan.number'),
+            )
+    if created:
+        msg = "Entered scan %s"
+        logger.info(msg % scan.identity)
+
+
+    guppifile, created = metadb.GuppiFile.get_or_create(
+            scan=scan,
+            number=info.pop('file.number'),
+            )
+    if created:
+        msg = "Entered file %s"
+        logger.info(msg % guppifile.identity)
+    # Add/update extra info about scan.
+    target, created = metadb.Target.get_or_create(
+            name=info.pop('target.name'),
+            )
+    if created:
+        msg = "Entered target %s"
+        logger.info(msg % target.name)
+    if scan.target is None:
+        scan.target = target
+        msg = "Set target %s for scan %s"
+        logger.info(msg % (target.name, scan.identity))
+    elif scan.target == target:
+        pass
+    else:
+        raise ValueError("Inconsistent targets between scan files.")
+    # Add/update extra info about file.
+
+    print info
+
+    allocation.save()
+    session.save()
+    scan.save()
+    guppifile.save()
+    target.save()
+
 
 
 def main():
@@ -52,8 +112,6 @@ def main():
                     filepath = path.join(dirpath, filename)
                     logger.debug("Matching file found: %s" % filepath)
                     process_file(filepath)
-
-
 
 
 

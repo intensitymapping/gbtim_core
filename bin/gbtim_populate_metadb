@@ -7,6 +7,7 @@ import os
 from os import path
 import sys
 import re
+import socket
 
 from gbtim_core import metadb
 
@@ -36,11 +37,35 @@ parser.add_argument(
 
 filename_re = re.compile(metadb.DATAFILE_PATTERN)
 
+HOSTNAME = socket.gethostname()
+
 
 def process_file(filepath):
     info = metadb.get_guppi_filename_info(filepath)
-    info.update(metadb.get_guppi_header_info(filepath))
-    #info.update(metadb.get_guppi_data_info(filepath))
+    try:
+        info.update(metadb.get_guppi_header_info(filepath))
+    except RuntimeError:
+        msg = "File is corrupt and cannot be opened: %s"
+        logging.warning(msg % filepath)
+        try:
+            metadb.FileCopy.get(
+                    path=filepath,
+                    host=HOSTNAME,
+                    )
+        except metadb.FileCopy.DoesNotExist:
+            file_ = metadb.File()
+            file_.save()
+            filecopy = metadb.FileCopy.create(
+                    file=file_,
+                    path=filepath,
+                    host=HOSTNAME,
+                    corrupt=True,
+                    )
+            msg = "Newly indexed file is corrupt and cannot be opened: %s"
+            logging.warning(msg % filepath)
+        # Check/index the md5sum.
+        return
+
 
     print info
     # Work down the hierachy.
@@ -66,14 +91,34 @@ def process_file(filepath):
         msg = "Entered scan %s"
         logger.info(msg % scan.identity)
 
-
-    guppifile, created = metadb.GuppiFile.get_or_create(
-            scan=scan,
-            number=info.pop('file.number'),
+    number = info.pop('file.number')
+    try: 
+        guppifile = metadb.GuppiFile.get(
+                scan=scan,
+                number=number,
+                )
+    except metadb.GuppiFile.DoesNotExist:
+        # File is not in database yet.
+        file_ = metadb.File()
+        file_.save()
+        guppifile = metadb.GuppiFile.create(
+                file=file_,
+                scan=scan,
+                number=number,
+                )
+        msg = "Entered Guppi file %s"
+        logger.info(msg % guppifile.identity)
+    else:
+        file_ = guppifile.file
+    filecopy, created = metadb.FileCopy.get_or_create(
+            file=file_,
+            path=filepath,
+            host=HOSTNAME,
             )
     if created:
-        msg = "Entered file %s"
-        logger.info(msg % guppifile.identity)
+        msg = "Entered file copy for %s at %s:%s."
+        logger.info(msg % (guppifile.identity, HOSTNAME, filepath))
+
     # Add/update extra info about scan.
     target, created = metadb.Target.get_or_create(
             name=info.pop('target.name'),
@@ -89,15 +134,66 @@ def process_file(filepath):
         pass
     else:
         raise ValueError("Inconsistent targets between scan files.")
+
     # Add/update extra info about file.
+    try:
+        data_info = metadb.get_guppi_data_info(filepath)
+    except RuntimeError:
+        # Data can't be read.
+        filecopy.corrupt = True
+        msg = "" # XXX
+    else:
+        info.update(data_info)
+        update_scan_fields(scan, info)
+
+    # md5 the file.
+
 
     print info
 
+
+    # file_.save()    # Crashes, never needed anyway.
+    filecopy.save()
     allocation.save()
     session.save()
     scan.save()
     guppifile.save()
     target.save()
+
+
+def update_scan_fields(scan, info):
+    # Check that the operation mode is consistent.
+    mode = info.pop('scan.mode')
+    if scan.mode is None:
+        scan.mode = mode
+    elif scan.mode != mode:
+        raise ValueError("Inconsistent modes between scan files.")
+    # Check that the cadence is consistent.
+    cadence = info.pop('scan.cadence')
+    if scan.cadence is None:
+        scan.cadence = cadence
+    elif scan.cadence != cadence:
+        raise ValueError("Inconsistent cadences between scan files.")
+
+    # Update the min/max of other fields.
+    for field_name in ['ra', 'dec', 'az', 'el']:
+        f_min_name = field_name + '_min'
+        f_max_name = field_name + '_max'
+        f_min = info.pop(f_min_name)
+        f_max = info.pop(f_max_name)
+        old_f_min = getattr(scan, f_min_name)
+        if f_min < old_f_min or old_f_min is None:
+            setattr(scan, f_min_name, f_min)
+        old_f_max = getattr(scan, f_max_name)
+        if f_max > old_f_max or old_f_max is None:
+            setattr(scan, f_max_name, f_max)
+
+    start_time = info.pop('scan.start_time')
+    if scan.start_time is None or start_time < scan.start_time:
+        scan.start_time = start_time
+    end_time = info.pop('scan.end_time')
+    if scan.end_time is None or end_time < scan.end_time:
+        scan.end_time = end_time
 
 
 
@@ -109,7 +205,7 @@ def main():
         for dirpath, subdirs, filenames in os.walk(directory):
             for filename in filenames:
                 if filename_re.match(filename):
-                    filepath = path.join(dirpath, filename)
+                    filepath = path.abspath(path.join(dirpath, filename))
                     logger.debug("Matching file found: %s" % filepath)
                     process_file(filepath)
 

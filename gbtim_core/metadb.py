@@ -43,6 +43,7 @@ DATAFILE_PATTERN : string
 
 
 import datetime
+import pytz
 import sqlite3
 import logging
 import re
@@ -81,6 +82,8 @@ def connect_db(filename):
     database_proxy.initialize(db)
     db.connect()
     db.create_tables([
+        File,
+        FileCopy,
         Target,
         Allocation,
         Session,
@@ -92,6 +95,36 @@ def connect_db(filename):
 
 # Tables pertaining to the raw data
 # =================================
+
+
+class File(base_model):
+    """Base table for all data files.
+
+    This model exits to tie together variouse 'file' models (such as
+    GuppiFile), and the FileCopy model.
+
+    """
+
+    #stuff = pw.CharFieryKeyField()
+
+
+class FileCopy(base_model):
+    """A copy of a file.
+
+    Attributes
+    ----------
+    file
+    directory
+    host
+
+    """
+
+    file = pw.ForeignKeyField(File, related_name='copies', null=False)
+    path = pw.CharField(max_length=128, null=False)
+    host = pw.CharField(max_length=128, null=False)
+    corrupt = pw.BooleanField(default=False)
+    md5sum = pw.CharField(max_length=32, null=True)
+
 
 class Target(base_model):
     """Sky source target.
@@ -228,7 +261,7 @@ class Scan(base_model):
 
 
 class GuppiFile(base_model):
-    """A single file of data, which may only be a subset of a scan.
+    """A single file of GUPPI data, which may only be a subset of a scan.
 
     Attributes
     ----------
@@ -238,33 +271,18 @@ class GuppiFile(base_model):
 
     """
 
-    scan = pw.ForeignKeyField(Scan, related_name='files', null=False)
     file = pw.ForeignKeyField(File, null=False)
+    scan = pw.ForeignKeyField(Scan, related_name='files', null=False)
     number = pw.IntegerField(null=False)
 
     @property
     def identity(self):
         return self.scan.identity + ".%04d" % self.number
 
-
-class File(base_model):
-    """A generic file in the database.
-
-    Attributes
-    ----------
-    filename
-    directory
-    md5sum
-
-    """
-
-    filename = pw.CharField(max_length=128, null=False)
-    directory = pw.CharField(max_length=128, null=False)
-    md5sum = pw.CharField(max_length=32, null=True)
-
     @property
-    def path(self):
-        return path.join(self.directory, self.filename)
+    def filecopies(self):
+        return self.file.copies
+
 
 
 # Meta data retrieval functions
@@ -285,7 +303,6 @@ def get_guppi_filename_info(filename):
 
     info = {}
     filename = path.basename(filename)
-    info['file.filename'] = filename
     filename_re = "guppi_[0-9]{5}_.*_([0-9]{4})_([0-9]{4}).fits"
     match = re.match(filename_re, filename)
     scan = int(match.group(1))
@@ -314,6 +331,7 @@ def get_guppi_header_info(filename):
 
     hdulist = fits.open(filename, 'readonly')
     header0 = hdulist[0].header
+    #print repr(hdulist[0].header)
 
     data_len = len(hdulist[1].data)
 
@@ -333,7 +351,7 @@ def get_guppi_header_info(filename):
     return info
 
 
-def get_guppi_data_info(filename, md5=False):
+def get_guppi_data_info(filename):
     """Read GUPPI data to retrieve meta data.
 
     Like :func:`get_guppi_header_info` but also reads the pointing information
@@ -349,13 +367,49 @@ def get_guppi_data_info(filename, md5=False):
 
     """
 
-    info = get_guppi_header_info(filename)
+    info = {}
 
     hdulist = fits.open(filename, 'readonly')
-
+    header0 = hdulist[0].header
     header1 = hdulist[1].header
+    data = hdulist[1].data
+
     #print repr(header1)
+
+    info['scan.cadence'] = float(header1['TBIN'])
+
+    start_time = float(data[0]['OFFS_SUB'] - data[0]['TSUBINT'] / 2)
+    end_time = float(data[-1]['OFFS_SUB'] + data[-1]['TSUBINT'] / 2)
+    start_time += header0['STT_SMJD'] + header0['STT_OFFS']
+    end_time += header0['STT_SMJD'] + header0['STT_OFFS']
+    unix_offset = _mjd_to_unix(header0['STT_IMJD'])
+    start_time += unix_offset
+    end_time += unix_offset
+    info['scan.start_time'] = start_time
+    info['scan.end_time'] = end_time
+
+    for name, fits_name in [('ra', 'RA_SUB'), ('dec', 'DEC_SUB'),
+            ('az', 'TEL_AZ'), ('zen', 'TEL_ZEN')]:
+        d = data[fits_name]
+        d_min = float(min(d))
+        d_max = float(max(d))
+        info[name + '_min'] = d_min
+        info[name + '_max'] = d_max
+
+    zen_min = info.pop('zen_min')
+    info['el_max'] = 90 - zen_min
+    zen_max = info.pop('zen_max')
+    info['el_min'] = 90 - zen_max
 
     hdulist.close()
     return info
+
+
+def _mjd_to_unix(mjd):
+
+    mjd_epoch = datetime.datetime(1858, 11, 17, 0, 0, 0, 0)
+    date = mjd_epoch + datetime.timedelta(mjd)
+    unix_delta = date - datetime.datetime.utcfromtimestamp(0)
+    unix_time = unix_delta.total_seconds()
+    return unix_time
 

@@ -63,14 +63,8 @@ def process_file(filepath):
                     )
             msg = "Newly indexed file is corrupt and cannot be opened: %s"
             logger.warning(msg % filepath)
-        # Check/index the file hash.
-        hash = metadb.hashfile(filepath)
-        if filecopy.hash is not None and filecopy.hash != hash:
-            msg = "File copy's hash does not match old value."
-            raise ValueError(msg)
-        elif filecopy.hash is None:
-            filecopy.hash = hash
-
+        # Stuff I can do on corrupt data.
+        update_file_copy_fields(filecopy, filepath)
         filecopy.save()
         return
 
@@ -153,13 +147,8 @@ def process_file(filepath):
         info.update(data_info)
         update_scan_fields(scan, info)
 
-    # Hash the file.
-    hash = metadb.hashfile(filepath)
-    if filecopy.hash is not None and filecopy.hash != hash:
-        msg = "File copy's hash does not match old value."
-        raise ValueError(msg)
-    elif filecopy.hash is None:
-        filecopy.hash = hash
+    # Hash and size.
+    update_file_copy_fields(filecopy, filepath)
 
     if not fc_created:
         msg = "Verified File copy %s"
@@ -207,6 +196,23 @@ def update_scan_fields(scan, info):
     end_time = info.pop('scan.end_time')
     if scan.end_time is None or end_time < scan.end_time:
         scan.end_time = end_time
+
+def update_file_copy_fields(filecopy, filepath):
+    # Check the file size.
+    size = path.getsize(filepath)
+    if filecopy.size is not None and filecopy.size != size:
+        msg = "File copy's size does not match old value."
+        raise ValueError(msg)
+    elif filecopy.size is None:
+        filecopy.size = size
+    # Check/index the file hash.
+    hash = metadb.hashfile(filepath)
+    if filecopy.hash is not None and filecopy.hash != hash:
+        msg = "File copy's hash does not match old value."
+        raise ValueError(msg)
+    elif filecopy.hash is None:
+        filecopy.hash = hash
+
 
 
 

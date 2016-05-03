@@ -128,6 +128,7 @@ class FileCopy(base_model):
     host = pw.CharField(max_length=128, null=False)
     corrupt = pw.BooleanField(default=False)
     hash = pw.CharField(max_length=64, null=True)
+    size = pw.BigIntegerField(null=True)
 
 
 class Target(base_model):

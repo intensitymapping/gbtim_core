@@ -46,7 +46,7 @@ def process_file(filepath):
     # See if we can open the file.
     try:
         info.update(metadb.get_guppi_header_info(filepath))
-    except RuntimeError:
+    except IOError:
         try:
             filecopy = metadb.FileCopy.get(
                     path=filepath,
@@ -144,7 +144,7 @@ def process_file(filepath):
     # Add/update extra info about file.
     try:
         data_info = metadb.get_guppi_data_info(filepath)
-    except RuntimeError:
+    except IOError:
         # Data can't be read.
         filecopy.corrupt = True
         msg = "Data in file cannot be read: %s"

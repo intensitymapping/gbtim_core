@@ -116,12 +116,12 @@ def process_file(filepath):
         logger.info(msg % guppifile.identity)
     else:
         file_ = guppifile.file
-    filecopy, created = metadb.FileCopy.get_or_create(
+    filecopy, fc_created = metadb.FileCopy.get_or_create(
             file=file_,
             path=filepath,
             host=HOSTNAME,
             )
-    if created:
+    if fc_created:
         msg = "Entered file copy for %s at %s:%s."
         logger.info(msg % (guppifile.identity, HOSTNAME, filepath))
 
@@ -160,6 +160,10 @@ def process_file(filepath):
         raise ValueError(msg)
     elif filecopy.hash is None:
         filecopy.hash = hash
+
+    if not fc_created:
+        msg = "Verified File copy %s"
+        logger.info(msg % filepath)
 
     # file_.save()    # Crashes (peewee bug?), never needed anyway.
     filecopy.save()

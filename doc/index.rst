@@ -12,6 +12,7 @@ Packages
     :toctree: generated/
 
    imdata
+   metadb
 
 Indices and tables
 ==================

@@ -1,0 +1,235 @@
+#! /usr/bin/python
+
+
+import argparse
+import logging
+import os
+from os import path
+import sys
+import re
+import socket
+import time
+
+from gbtim_core import metadb
+
+logger = logging.getLogger(__name__)
+
+# Display logging from all modules.
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+#logger.setLevel(logging.INFO)
+#logger.addHandler(logging.StreamHandler())
+
+
+parser = argparse.ArgumentParser(
+        description='Crawl directory tree and populate index of GBTIM data',
+        )
+parser.add_argument(
+        "database",
+        type=str,
+        help="SQLite database file.",
+        )
+parser.add_argument(
+        "directory",
+        nargs='*',
+        type=str,
+        help="What directories to crawl when searching files.",
+        )
+
+
+filename_re = re.compile(metadb.DATAFILE_PATTERN)
+
+HOSTNAME = socket.gethostname()
+
+
+def process_file(filepath):
+    info = metadb.get_guppi_filename_info(filepath)
+    # See if we can open the file.
+    try:
+        info.update(metadb.get_guppi_header_info(filepath))
+    except IOError:
+        try:
+            filecopy = metadb.FileCopy.get(
+                    path=filepath,
+                    host=HOSTNAME,
+                    )
+        except metadb.FileCopy.DoesNotExist:
+            file_ = metadb.File()
+            file_.save()
+            filecopy = metadb.FileCopy.create(
+                    file=file_,
+                    path=filepath,
+                    host=HOSTNAME,
+                    corrupt=True,
+                    )
+            msg = "Newly indexed file is corrupt and cannot be opened: %s"
+            logger.warning(msg % filepath)
+        # Stuff I can do on corrupt data.
+        update_file_copy_fields(filecopy, filepath)
+        filecopy.save()
+        return
+
+    # Work down the hierachy.
+    allocation, created = metadb.Allocation.get_or_create(
+            term=info.pop('allocation.term'),
+            number=info.pop('allocation.number'),
+            )
+    if created:
+        msg = "Entered allocation %s"
+        logger.info(msg % allocation.name)
+    session, created = metadb.Session.get_or_create(
+            allocation=allocation,
+            number=info.pop('session.number'),
+            )
+    if created:
+        msg = "Entered session %s"
+        logger.info(msg % session.identity)
+    scan, created = metadb.Scan.get_or_create(
+            session=session,
+            number=info.pop('scan.number'),
+            )
+    if created:
+        msg = "Entered scan %s"
+        logger.info(msg % scan.identity)
+
+    number = info.pop('file.number')
+    try: 
+        guppifile = metadb.GuppiFile.get(
+                scan=scan,
+                number=number,
+                )
+    except metadb.GuppiFile.DoesNotExist:
+        # File is not in database yet.
+        file_ = metadb.File()
+        file_.save()
+        guppifile = metadb.GuppiFile.create(
+                file=file_,
+                scan=scan,
+                number=number,
+                )
+        msg = "Entered Guppi file %s"
+        logger.info(msg % guppifile.identity)
+    else:
+        file_ = guppifile.file
+    filecopy, fc_created = metadb.FileCopy.get_or_create(
+            file=file_,
+            path=filepath,
+            host=HOSTNAME,
+            )
+    if fc_created:
+        msg = "Entered file copy for %s at %s:%s."
+        logger.info(msg % (guppifile.identity, HOSTNAME, filepath))
+
+    # Add/update extra info about scan.
+    target, created = metadb.Target.get_or_create(
+            name=info.pop('target.name'),
+            )
+    if created:
+        msg = "Entered target %s"
+        logger.info(msg % target.name)
+    if scan.target is None:
+        scan.target = target
+        msg = "Set target %s for scan %s"
+        logger.info(msg % (target.name, scan.identity))
+    elif scan.target == target:
+        pass
+    else:
+        raise ValueError("Inconsistent targets between scan files.")
+
+    # Add/update extra info about file.
+    try:
+        data_info = metadb.get_guppi_data_info(filepath)
+    except IOError:
+        # Data can't be read.
+        filecopy.corrupt = True
+        msg = "Data in file cannot be read: %s"
+        logger.warning(msg % filepath)
+    else:
+        info.update(data_info)
+        update_scan_fields(scan, info)
+
+    # Hash and size.
+    update_file_copy_fields(filecopy, filepath)
+
+    if not fc_created:
+        msg = "Verified File copy %s"
+        logger.info(msg % filepath)
+
+    # file_.save()    # Crashes (peewee bug?), never needed anyway.
+    filecopy.save()
+    allocation.save()
+    session.save()
+    scan.save()
+    guppifile.save()
+    target.save()
+
+
+def update_scan_fields(scan, info):
+    # Check that the operation mode is consistent.
+    mode = info.pop('scan.mode')
+    if scan.mode is None:
+        scan.mode = mode
+    elif scan.mode != mode:
+        raise ValueError("Inconsistent modes between scan files.")
+    # Check that the cadence is consistent.
+    cadence = info.pop('scan.cadence')
+    if scan.cadence is None:
+        scan.cadence = cadence
+    elif scan.cadence != cadence:
+        raise ValueError("Inconsistent cadences between scan files.")
+
+    # Update the min/max of other fields.
+    for field_name in ['ra', 'dec', 'az', 'el']:
+        f_min_name = field_name + '_min'
+        f_max_name = field_name + '_max'
+        f_min = info.pop(f_min_name)
+        f_max = info.pop(f_max_name)
+        old_f_min = getattr(scan, f_min_name)
+        if f_min < old_f_min or old_f_min is None:
+            setattr(scan, f_min_name, f_min)
+        old_f_max = getattr(scan, f_max_name)
+        if f_max > old_f_max or old_f_max is None:
+            setattr(scan, f_max_name, f_max)
+
+    start_time = info.pop('scan.start_time')
+    if scan.start_time is None or start_time < scan.start_time:
+        scan.start_time = start_time
+    end_time = info.pop('scan.end_time')
+    if scan.end_time is None or end_time < scan.end_time:
+        scan.end_time = end_time
+
+def update_file_copy_fields(filecopy, filepath):
+    # Check the file size.
+    size = path.getsize(filepath)
+    if filecopy.size is not None and filecopy.size != size:
+        msg = "File copy's size does not match old value."
+        raise ValueError(msg)
+    elif filecopy.size is None:
+        filecopy.size = size
+    # Check/index the file hash.
+    hash = metadb.hashfile(filepath)
+    if filecopy.hash is not None and filecopy.hash != hash:
+        msg = "File copy's hash does not match old value."
+        raise ValueError(msg)
+    elif filecopy.hash is None:
+        filecopy.hash = hash
+
+
+
+
+def main():
+    args = parser.parse_args()
+    metadb.connect_db(args.database)
+
+    for directory in args.directory:
+        for dirpath, subdirs, filenames in os.walk(directory):
+            for filename in filenames:
+                if filename_re.match(filename):
+                    filepath = path.abspath(path.join(dirpath, filename))
+                    logger.debug("Matching file found: %s" % filepath)
+                    process_file(filepath)
+
+
+
+
+if __name__ == "__main__":
+    main()

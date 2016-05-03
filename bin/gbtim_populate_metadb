@@ -8,6 +8,7 @@ from os import path
 import sys
 import re
 import socket
+import time
 
 from gbtim_core import metadb
 
@@ -42,13 +43,12 @@ HOSTNAME = socket.gethostname()
 
 def process_file(filepath):
     info = metadb.get_guppi_filename_info(filepath)
+    # See if we can open the file.
     try:
         info.update(metadb.get_guppi_header_info(filepath))
     except RuntimeError:
-        msg = "File is corrupt and cannot be opened: %s"
-        logging.warning(msg % filepath)
         try:
-            metadb.FileCopy.get(
+            filecopy = metadb.FileCopy.get(
                     path=filepath,
                     host=HOSTNAME,
                     )
@@ -62,12 +62,18 @@ def process_file(filepath):
                     corrupt=True,
                     )
             msg = "Newly indexed file is corrupt and cannot be opened: %s"
-            logging.warning(msg % filepath)
-        # Check/index the md5sum.
+            logger.warning(msg % filepath)
+        # Check/index the file hash.
+        hash = metadb.hashfile(filepath)
+        if filecopy.hash is not None and filecopy.hash != hash:
+            msg = "File copy's hash does not match old value."
+            raise ValueError(msg)
+        elif filecopy.hash is None:
+            filecopy.hash = hash
+
+        filecopy.save()
         return
 
-
-    print info
     # Work down the hierachy.
     allocation, created = metadb.Allocation.get_or_create(
             term=info.pop('allocation.term'),
@@ -141,18 +147,21 @@ def process_file(filepath):
     except RuntimeError:
         # Data can't be read.
         filecopy.corrupt = True
-        msg = "" # XXX
+        msg = "Data in file cannot be read: %s"
+        logger.warning(msg % filepath)
     else:
         info.update(data_info)
         update_scan_fields(scan, info)
 
-    # md5 the file.
+    # Hash the file.
+    hash = metadb.hashfile(filepath)
+    if filecopy.hash is not None and filecopy.hash != hash:
+        msg = "File copy's hash does not match old value."
+        raise ValueError(msg)
+    elif filecopy.hash is None:
+        filecopy.hash = hash
 
-
-    print info
-
-
-    # file_.save()    # Crashes, never needed anyway.
+    # file_.save()    # Crashes (peewee bug?), never needed anyway.
     filecopy.save()
     allocation.save()
     session.save()

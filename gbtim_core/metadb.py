@@ -47,6 +47,7 @@ import pytz
 import sqlite3
 import logging
 import re
+import hashlib
 from os import path
 
 import peewee as pw
@@ -116,6 +117,9 @@ class FileCopy(base_model):
     file
     directory
     host
+    corrupt
+    hash : 64 character string
+        sha256 hash of the file, in hex.
 
     """
 
@@ -123,7 +127,7 @@ class FileCopy(base_model):
     path = pw.CharField(max_length=128, null=False)
     host = pw.CharField(max_length=128, null=False)
     corrupt = pw.BooleanField(default=False)
-    md5sum = pw.CharField(max_length=32, null=True)
+    hash = pw.CharField(max_length=64, null=True)
 
 
 class Target(base_model):
@@ -267,7 +271,6 @@ class GuppiFile(base_model):
     ----------
     scan
     filename
-    md5sum
 
     """
 
@@ -356,8 +359,7 @@ def get_guppi_data_info(filename):
 
     Like :func:`get_guppi_header_info` but also reads the pointing information
     to retrieve *cadence*, *ra_min*, *ra_max*, *dec_min*, *dec_max, *az_min*,
-    *az_max*, *el_min*, and *el_max*. Optionally perform an md5sum on the file
-    (*md5sum*).
+    *az_max*, *el_min*, and *el_max*.
 
     Returns
     -------
@@ -403,6 +405,15 @@ def get_guppi_data_info(filename):
 
     hdulist.close()
     return info
+
+
+def hashfile(filename):
+    block = 1024**2
+    hash = hashlib.sha256()
+    with open(filename, 'rb') as f:
+        for chunk in iter(lambda: f.read(block), b""):
+            hash.update(chunk)
+    return hash.hexdigest()
 
 
 def _mjd_to_unix(mjd):
